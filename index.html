@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Tic Tac Toe</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <style>
+        :root {
+            --primary-color: rgba(0, 123, 255, 0.8);
+            --secondary-color: rgba(0, 38, 77, 0.95); 
+            --accent-color: rgba(0, 255, 255, 0.9);
+            --glass-bg: rgba(255, 255, 255, 0.1);
+            --glass-border: rgba(255, 255, 255, 0.2);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #001f3f, #0066cc);
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            overflow: hidden;
+        }
+
+        .game-wrapper {
+            display: flex;
+            gap: 40px;
+            padding: 20px;
+            background: var(--glass-bg);
+            border-radius: 20px;
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        #game-container {
+            text-align: center;
+        }
+
+        #level-display {
+            font-size: 24px;
+            margin-bottom: 20px;
+            color: var(--accent-color);
+        }
+
+        #progress-container {
+            width: 100%;
+            height: 10px;
+            background: var(--glass-bg);
+            border-radius: 5px;
+            margin: 10px 0 20px;
+            overflow: hidden;
+        }
+
+        #progress-bar {
+            height: 100%;
+            background: var(--accent-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 20px auto;
+            max-width: 400px;
+        }
+
+        .cell {
+            width: 100px;
+            height: 100px;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(5px);
+        }
+
+        .cell:hover {
+            background: var(--accent-color);
+            transform: scale(1.05);
+        }
+
+        #predictor {
+            width: 200px;
+            padding: 20px;
+            background: var(--glass-bg);
+            border-radius: 15px;
+            border: 1px solid var(--glass-border);
+        }
+
+        #win-chance {
+            font-size: 36px;
+            margin: 20px 0;
+            color: var(--accent-color);
+        }
+
+        .chance-meter {
+            height: 200px;
+            width: 20px;
+            background: var(--glass-bg);
+            border-radius: 10px;
+            margin: 20px auto;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chance-fill {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            background: var(--accent-color);
+            transition: height 0.5s ease;
+        }
+
+        #fireworks {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .firework {
+            position: absolute;
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            animation: explode 1s ease-out forwards;
+        }
+
+        @keyframes explode {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(20);
+                opacity: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="game-wrapper">
+        <div id="game-container">
+            <div id="level-display">Level 1</div>
+            <div id="progress-container">
+                <div id="progress-bar"></div>
+            </div>
+            <div id="board"></div>
+        </div>
+        <div id="predictor">
+            <h3>Win Probability</h3>
+            <div id="win-chance">50%</div>
+            <div class="chance-meter">
+                <div class="chance-fill" style="height: 50%"></div>
+            </div>
+        </div>
+    </div>
+    <div id="fireworks"></div>
+
+    <script>
+        class TicTacToe {
+            constructor() {
+                this.board = Array(9).fill('');
+                this.currentLevel = 1;
+                this.model = null;
+                this.winChance = 0.5;
+                this.initializeBoard();
+                this.loadModel();
+                this.updateProgressBar();
+            }
+
+            async loadModel() {
+                // Enhanced neural network with more layers and units
+                this.model = tf.sequential({
+                    layers: [
+                        tf.layers.dense({inputShape: [9], units: 256, activation: 'relu'}),
+                        tf.layers.dropout(0.3),
+                        tf.layers.dense({units: 128, activation: 'relu'}),
+                        tf.layers.dropout(0.2),
+                        tf.layers.dense({units: 64, activation: 'relu'}),
+                        tf.layers.dense({units: 9, activation: 'softmax'})
+                    ]
+                });
+
+                await this.model.compile({
+                    optimizer: tf.train.adam(0.001 / Math.sqrt(this.currentLevel)),
+                    loss: 'categoricalCrossentropy'
+                });
+            }
+
+            updateProgressBar() {
+                const progress = (this.currentLevel - 1) / 31 * 100;
+                document.getElementById('progress-bar').style.width = `${progress}%`;
+            }
+
+            updateWinChance() {
+                const emptySpaces = this.board.filter(cell => cell === '').length;
+                const playerMoves = this.board.filter(cell => cell === 'X').length;
+                const aiMoves = this.board.filter(cell => cell === 'O').length;
+                
+                let baseChance = 0.5;
+                baseChance += (playerMoves - aiMoves) * 0.1;
+                baseChance -= (this.currentLevel / 32) * 0.3;
+                baseChance = Math.max(0.1, Math.min(0.9, baseChance));
+                
+                this.winChance = baseChance;
+                document.getElementById('win-chance').textContent = `${Math.round(this.winChance * 100)}%`;
+                document.querySelector('.chance-fill').style.height = `${this.winChance * 100}%`;
+            }
+
+            initializeBoard() {
+                const boardElement = document.getElementById('board');
+                boardElement.innerHTML = '';
+                this.board = Array(9).fill('');
+                this.updateWinChance();
+
+                for (let i = 0; i < 9; i++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.addEventListener('click', () => this.makeMove(i));
+                    boardElement.appendChild(cell);
+                }
+            }
+
+            async makeMove(index) {
+                if (this.board[index] || this.checkWinner()) return;
+
+                // Player move
+                this.board[index] = 'X';
+                this.updateDisplay();
+                this.updateWinChance();
+
+                if (this.checkWinner() === 'X') {
+                    this.levelUp();
+                    return;
+                }
+
+                // AI move with increasing difficulty
+                if (!this.board.includes('')) return;
+
+                const aiMove = await this.getAIMove();
+                this.board[aiMove] = 'O';
+                this.updateDisplay();
+                this.updateWinChance();
+
+                if (this.checkWinner() === 'O') {
+                    this.showGameOver();
+                }
+            }
+
+            async getAIMove() {
+                const input = tf.tensor2d([this.board.map(cell => 
+                    cell === 'X' ? 1 : cell === 'O' ? -1 : 0
+                )]);
+
+                const prediction = await this.model.predict(input).data();
+                let moves = [];
+                
+                prediction.forEach((value, index) => {
+                    if (this.board[index] === '') {
+                        const randomFactor = Math.random() * (32 - this.currentLevel) / 32;
+                        moves.push({index, value: value + randomFactor});
+                    }
+                });
+
+                moves.sort((a, b) => b.value - a.value);
+                return moves[0].index;
+            }
+
+            updateDisplay() {
+                const cells = document.getElementsByClassName('cell');
+                for (let i = 0; i < 9; i++) {
+                    cells[i].textContent = this.board[i];
+                    cells[i].style.color = this.board[i] === 'X' ? 'white' : 'var(--accent-color)';
+                }
+            }
+
+            checkWinner() {
+                const lines = [
+                    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                    [0, 4, 8], [2, 4, 6]
+                ];
+
+                for (let line of lines) {
+                    const [a, b, c] = line;
+                    if (this.board[a] && this.board[a] === this.board[b] && this.board[a] === this.board[c]) {
+                        return this.board[a];
+                    }
+                }
+
+                return null;
+            }
+
+            createFirework() {
+                const firework = document.createElement('div');
+                firework.className = 'firework';
+                firework.style.left = Math.random() * 100 + '%';
+                firework.style.top = Math.random() * 100 + '%';
+                firework.style.backgroundColor = `hsl(${Math.random() * 360}, 100%, 50%)`;
+                
+                document.getElementById('fireworks').appendChild(firework);
+                setTimeout(() => firework.remove(), 1000);
+            }
+
+            levelUp() {
+                this.currentLevel++;
+                if (this.currentLevel > 32) {
+                    alert('🎉 Congratulations! You beat all levels! You\'re amazing! 🎉');
+                    this.currentLevel = 1;
+                }
+                
+                document.getElementById('level-display').textContent = `Level ${this.currentLevel}`;
+                this.updateProgressBar();
+                
+                for (let i = 0; i < 20; i++) {
+                    setTimeout(() => this.createFirework(), i * 100);
+                }
+
+                setTimeout(() => {
+                    this.initializeBoard();
+                    this.loadModel();
+                }, 1500);
+            }
+
+            showGameOver() {
+                setTimeout(() => {
+                    alert('Game Over! Don\'t worry, you can try again! 😊');
+                    this.initializeBoard();
+                }, 500);
+            }
+        }
+
+        // Start game when page loads
+        window.addEventListener('load', () => {
+            new TicTacToe();
+        });
+    </script>
+</body>
+</html>
